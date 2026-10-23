@@ -22,6 +22,12 @@ pub const FULL: u8 = 0;
 pub const COMPACT: u8 = 1;
 /// One drop-down button holding the whole group.
 pub const COLLAPSED: u8 = 2;
+/// Embedded (KoAssist): only the group's essential controls, between compact and collapsed —
+/// a narrow host panel keeps bold, italic, the lists and the alignment at hand instead of a
+/// drop-down. A group that knows no essentials draws compact at this level and measures that.
+pub const ESSENTIAL: u8 = 3;
+/// Estimated share of a group's full width at the essential level before it is measured.
+const ESSENTIAL_FRACTION: f32 = 0.55;
 
 /// Estimated width of a collapsed group (its button and divider) before it is measured.
 const COLLAPSED_W: f32 = 64.0;
@@ -30,24 +36,47 @@ const COLLAPSED_W: f32 = 64.0;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct GroupWidths {
     pub title: String,
-    pub widths: [Option<f32>; 3],
+    /// By level: full, compact, collapsed, essential.
+    pub widths: [Option<f32>; 4],
 }
 
 /// Each group's level (by position) so that the row fits `avail`: groups shrink from the right,
 /// first all to compact, then to collapsed, stopping as soon as the row fits. Then whatever room is
 /// left is given back, from the left.
 pub fn plan(groups: &[GroupWidths], avail: f32) -> Vec<u8> {
+    plan_with(groups, avail, false)
+}
+
+/// The levels from compact down, as the planner tries them: with `essentials` (embedded) the
+/// essential level sits between compact and collapsed.
+fn shrink_order(essentials: bool) -> &'static [u8] {
+    if essentials { &[COMPACT, ESSENTIAL, COLLAPSED] } else { &[COMPACT, COLLAPSED] }
+}
+
+/// The next wider level, if any: what a group gets back when room is left.
+fn wider_level(level: u8, essentials: bool) -> Option<u8> {
+    match level {
+        COMPACT => Some(FULL),
+        ESSENTIAL => Some(COMPACT),
+        COLLAPSED => Some(if essentials { ESSENTIAL } else { COMPACT }),
+        _ => None,
+    }
+}
+
+/// [`plan`], with the essential level in play when `essentials` is set (embedded, KoAssist).
+pub fn plan_with(groups: &[GroupWidths], avail: f32, essentials: bool) -> Vec<u8> {
     let full = |g: &GroupWidths| g.widths[0].unwrap_or(0.0);
     let width = |g: &GroupWidths, level: u8| -> f32 {
         match level {
             FULL => full(g),
             COMPACT => g.widths[1].unwrap_or(full(g)),
+            ESSENTIAL => g.widths[3].unwrap_or((full(g) * ESSENTIAL_FRACTION).max(COLLAPSED_W)),
             _ => g.widths[2].unwrap_or(COLLAPSED_W.min(full(g))),
         }
     };
     let mut levels = vec![FULL; groups.len()];
     let mut total: f32 = groups.iter().map(full).sum();
-    for target in [COMPACT, COLLAPSED] {
+    for target in shrink_order(essentials).iter().copied() {
         for i in (0..groups.len()).rev() {
             if total <= avail {
                 break;
@@ -60,8 +89,7 @@ pub fn plan(groups: &[GroupWidths], avail: f32) -> Vec<u8> {
     // Shrinking a wide group (Styles) can make room the groups shrunk before it no longer need,
     // and a group of large buttons gains nothing collapsed: give back whatever still fits.
     for (g, level) in groups.iter().zip(levels.iter_mut()) {
-        while *level > FULL {
-            let wider = *level - 1;
+        while let Some(wider) = wider_level(*level, essentials) {
             let next = total + width(g, wider) - width(g, *level);
             if !next.is_finite() || next > avail {
                 break;
@@ -101,6 +129,9 @@ fn measured_id() -> Id {
 fn compact_id() -> Id {
     Id::new("ribbon_fit_compact")
 }
+fn essential_id() -> Id {
+    Id::new("ribbon_fit_essential")
+}
 fn saving_id() -> Id {
     Id::new("ribbon_fit_saving")
 }
@@ -115,6 +146,11 @@ fn signature(ctx: &Context) -> String {
 
 /// Start drawing `tab` in a row `avail` points wide: plan the groups' levels.
 pub fn begin(ctx: &Context, tab: &str, avail: f32) {
+    begin_with(ctx, tab, avail, false);
+}
+
+/// [`begin`], planning with the essential level when `essentials` is set (embedded, KoAssist).
+pub fn begin_with(ctx: &Context, tab: &str, avail: f32, essentials: bool) {
     let sig = signature(ctx);
     let (titles, groups) = ctx.data_mut(|d| {
         let m = d.get_temp_mut_or_default::<Measured>(measured_id());
@@ -128,12 +164,12 @@ pub fn begin(ctx: &Context, tab: &str, avail: f32) {
             .enumerate()
             .map(|(i, t)| GroupWidths {
                 title: t.clone(),
-                widths: [FULL, COMPACT, COLLAPSED].map(|l| m.widths.get(&(tab.to_string(), i, t.clone(), l)).copied()),
+                widths: [FULL, COMPACT, COLLAPSED, ESSENTIAL].map(|l| m.widths.get(&(tab.to_string(), i, t.clone(), l)).copied()),
             })
             .collect();
         (titles, groups)
     });
-    let levels = if groups.iter().all(|g| g.widths[0].is_some()) { plan(&groups, avail) } else { Vec::new() };
+    let levels = if groups.iter().all(|g| g.widths[0].is_some()) { plan_with(&groups, avail, essentials) } else { Vec::new() };
     ctx.data_mut(|d| {
         d.insert_temp(frame_id(), Frame { tab: tab.to_string(), titles, levels, drawn: Vec::new() });
         d.insert_temp(active_id(), true);
@@ -219,7 +255,21 @@ pub fn set_compact(ctx: &Context, on: bool) {
 
 /// The group's controls are drawn: what follows isn't compact (what they could give up is kept).
 pub fn end_compact(ctx: &Context) {
-    ctx.data_mut(|d| d.insert_temp(compact_id(), false));
+    ctx.data_mut(|d| {
+        d.insert_temp(compact_id(), false);
+        d.insert_temp(essential_id(), false);
+    });
+}
+
+/// Whether the group being drawn is at the essential level (embedded: only its essential
+/// controls; a group without essentials draws compact).
+pub fn essential(ctx: &Context) -> bool {
+    ctx.data(|d| d.get_temp::<bool>(essential_id())).unwrap_or(false)
+}
+
+/// Mark the group being drawn essential or not.
+pub fn set_essential(ctx: &Context, on: bool) {
+    ctx.data_mut(|d| d.insert_temp(essential_id(), on));
 }
 
 /// A control of a group drawn as designed would be `w` points narrower in a compact group.
@@ -244,7 +294,26 @@ mod tests {
     use super::*;
 
     fn g(title: &str, full: f32, compact: Option<f32>, collapsed: Option<f32>) -> GroupWidths {
-        GroupWidths { title: title.into(), widths: [Some(full), compact, collapsed] }
+        GroupWidths { title: title.into(), widths: [Some(full), compact, collapsed, None] }
+    }
+
+    fn ge(title: &str, full: f32, compact: f32, essential: Option<f32>) -> GroupWidths {
+        GroupWidths { title: title.into(), widths: [Some(full), Some(compact), Some(60.0), essential] }
+    }
+
+    /// Embedded: a narrow panel keeps Font and Paragraph at their essentials instead of folding
+    /// them; without the essential level the same room folds Paragraph away.
+    #[test]
+    fn essentials_sit_between_compact_and_collapsed() {
+        let gs = [ge("Font", 340.0, 330.0, Some(215.0)), ge("Paragraph", 300.0, 290.0, Some(190.0)), ge("Styles", 240.0, 160.0, None)];
+        assert_eq!(plan_with(&gs, 480.0, true), vec![ESSENTIAL, ESSENTIAL, COLLAPSED]);
+        assert_eq!(plan_with(&gs, 480.0, false), vec![FULL, COLLAPSED, COLLAPSED]);
+        assert_eq!(plan(&gs, 480.0), plan_with(&gs, 480.0, false), "plan is the planner without essentials");
+        // Plenty of room: as designed, in both modes.
+        assert_eq!(plan_with(&gs, 2000.0, true), vec![FULL, FULL, FULL]);
+        // An unmeasured essential width is estimated from the full width, so the plan settles.
+        assert_eq!(plan_with(&gs, 340.0, true), vec![ESSENTIAL, COLLAPSED, COLLAPSED]);
+        assert_eq!(plan_with(&gs, 250.0, true), vec![COLLAPSED, COLLAPSED, COLLAPSED]);
     }
 
     #[test]

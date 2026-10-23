@@ -441,7 +441,8 @@ pub fn group_titled(ui: &mut Ui, id_title: &str, title: &str, launcher: Option<&
         let label_w = ui.ctx().fonts_mut(|f| f.layout_no_wrap(title.to_string(), regular(11.0), t.group_label).size().x);
         let inner = ui.vertical(|ui| {
             ui.set_min_width(label_w + if launcher.is_some() { 22.0 } else { 10.0 });
-            crate::ribbon_fit::set_compact(ui.ctx(), level == crate::ribbon_fit::COMPACT);
+            crate::ribbon_fit::set_compact(ui.ctx(), level == crate::ribbon_fit::COMPACT || level == crate::ribbon_fit::ESSENTIAL);
+            crate::ribbon_fit::set_essential(ui.ctx(), level == crate::ribbon_fit::ESSENTIAL);
             let content = ui.allocate_ui_with_layout(vec2(ui.available_width(), CONTENT_H), egui::Layout::left_to_right(egui::Align::Min), |ui| {
                 ui.spacing_mut().item_spacing = vec2(1.0, 1.0);
                 add(ui, app);

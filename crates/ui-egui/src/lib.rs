@@ -2566,8 +2566,13 @@ impl WordApp {
             } else {
                 self.run("file.open", json!({"path": name, "data": wordcraft_engine::cmd::insert::base64_encode(&bytes)}))
             };
+            let opened_document = r.is_ok() && !(sheet || list || img || wordcraft_fonts::is_font_file_name(&lower));
             if r.is_ok() {
                 self.ui.backstage = false;
+            }
+            // Embedded (KoAssist): a document the page opens fits the panel's width.
+            if opened_document && self.embedded.is_some() {
+                let _ = self.run("view.pageWidth", json!({}));
             }
         }
     }

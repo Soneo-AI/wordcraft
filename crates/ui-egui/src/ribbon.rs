@@ -526,7 +526,8 @@ pub fn show(app: &mut WordApp, ui: &mut Ui) {
             let bg = ui.interact(ui.max_rect(), ui.id().with("ribbon_background"), Sense::click());
             bg.context_menu(|ui| crate::widgets::customize_menu_items(ui, app));
             let entry = user_tabs.iter().find(|e| e.name == app.ui.tab);
-            crate::ribbon_fit::begin(ui.ctx(), &app.ui.tab, ui.available_width() - 4.0);
+            // Embedded (KoAssist): a narrow panel keeps the groups' essentials (see ribbon_fit).
+            crate::ribbon_fit::begin_with(ui.ctx(), &app.ui.tab, ui.available_width() - 4.0, app.embedded.is_some());
             let scroll = egui::ScrollArea::horizontal().scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden).show(ui, |ui| {
                 ui.horizontal_top(|ui| {
                     ui.spacing_mut().item_spacing = vec2(2.0, 2.0);
@@ -1094,6 +1095,9 @@ fn home(app: &mut WordApp, ui: &mut Ui) {
         });
     });
     group(ui, "Font", Some("format.fontDialog"), app, |ui, app| {
+        // Essential level (embedded, narrow): font, size, bold, italic, underline, the two
+        // colours; the rest waits for more room.
+        let essential = crate::ribbon_fit::essential(ui.ctx());
         stack(ui, |ui| {
             crate::widgets::row(ui, |ui| {
                 let font = st.get("font").and_then(Value::as_str).unwrap_or("").to_string();
@@ -1101,7 +1105,16 @@ fn home(app: &mut WordApp, ui: &mut Ui) {
                 let fams = app.previews.families();
                 let recent: Vec<String> = app.ui.recent_fonts.iter().map(|f| app.previews.font_shown(f)).collect();
                 let prev = app.previews.font_preview_fn();
-                if let Some(f) = crate::widgets::font_combo_with_recent_hint(ui, "font", 150.0, &font, &fams, &recent, Some(&*prev), tl!("Font")) {
+                if let Some(f) = crate::widgets::font_combo_with_recent_hint(
+                    ui,
+                    "font",
+                    if essential { 120.0 } else { 150.0 },
+                    &font,
+                    &fams,
+                    &recent,
+                    Some(&*prev),
+                    tl!("Font"),
+                ) {
                     let _ = if f == crate::widgets::ADD_FONT {
                         app.run("font.add", json!({}))
                     } else if f == crate::widgets::LOAD_SYSTEM_FONTS {
@@ -1123,45 +1136,49 @@ fn home(app: &mut WordApp, ui: &mut Ui) {
                 {
                     let _ = app.run("format.size", json!({"size": x}));
                 }
-                ui.add_space(3.0);
-                small(ui, app, "grow", None, "Increase Font Size", "format.growFont", json!({}), false);
-                small(ui, app, "shrink", None, "Decrease Font Size", "format.shrinkFont", json!({}), false);
-                menu_button(ui, app, "case", None, "Change Case", false, "format.changeCase", |ui, app| {
-                    mi(ui, app, "Sentence case.", "format.changeCase", json!({"mode": "sentence"}));
-                    mi(ui, app, "lowercase", "format.changeCase", json!({"mode": "lower"}));
-                    mi(ui, app, "UPPERCASE", "format.changeCase", json!({"mode": "upper"}));
-                    mi(ui, app, "Capitalize Each Word", "format.changeCase", json!({"mode": "title"}));
-                    mi(ui, app, "tOGGLE cASE", "format.changeCase", json!({"mode": "toggle"}));
-                });
-                small(ui, app, "clear", None, "Clear All Formatting", "format.clear", json!({}), false);
-                small(ui, app, "phonetic", None, "Phonetic Guide", "format.phonetic", json!({}), false);
+                if !essential {
+                    ui.add_space(3.0);
+                    small(ui, app, "grow", None, "Increase Font Size", "format.growFont", json!({}), false);
+                    small(ui, app, "shrink", None, "Decrease Font Size", "format.shrinkFont", json!({}), false);
+                    menu_button(ui, app, "case", None, "Change Case", false, "format.changeCase", |ui, app| {
+                        mi(ui, app, "Sentence case.", "format.changeCase", json!({"mode": "sentence"}));
+                        mi(ui, app, "lowercase", "format.changeCase", json!({"mode": "lower"}));
+                        mi(ui, app, "UPPERCASE", "format.changeCase", json!({"mode": "upper"}));
+                        mi(ui, app, "Capitalize Each Word", "format.changeCase", json!({"mode": "title"}));
+                        mi(ui, app, "tOGGLE cASE", "format.changeCase", json!({"mode": "toggle"}));
+                    });
+                    small(ui, app, "clear", None, "Clear All Formatting", "format.clear", json!({}), false);
+                    small(ui, app, "phonetic", None, "Phonetic Guide", "format.phonetic", json!({}), false);
+                }
             });
             ui.add_space(3.0);
             crate::widgets::row(ui, |ui| {
                 small(ui, app, "bold", None, "Bold", "format.bold", json!({}), flag("bold"));
                 small(ui, app, "italic", None, "Italic", "format.italic", json!({}), flag("italic"));
                 split(ui, app, "underline", "Underline", "format.underline", json!({}), flag("underline"), None, underline_menu);
-                small(ui, app, "strike", None, "Strikethrough", "format.strikethrough", json!({}), flag("strike"));
-                small(ui, app, "subscript", None, "Subscript", "format.subscript", json!({}), flag("subscript"));
-                small(ui, app, "superscript", None, "Superscript", "format.superscript", json!({}), flag("superscript"));
-                small(ui, app, "charborder", None, "Character Border", "format.border", json!({}), flag("border"));
-                small(ui, app, "enclose", None, "Enclose Characters", "format.enclose", json!({}), false);
-                ui.add_space(4.0);
-                menu_button(ui, app, "effects", None, "Text Effects and Typography", false, "", |ui, app| {
-                    let theme = app.session.doc.settings.theme_colors.clone();
-                    crate::wordart_menus::style_gallery(ui, app, "format.textEffects");
-                    ui.separator();
-                    ui.menu_button(tl!("Text Fill"), |ui| crate::wordart_menus::fill_menu(ui, app, &theme));
-                    let outline = crate::wordart_menus::current_outline(app);
-                    ui.menu_button(tl!("Text Outline"), |ui| crate::wordart_menus::outline_menu(ui, app, &theme, outline));
-                    crate::wordart_menus::effects_menu(ui, app, &theme, false);
-                    ui.separator();
-                    mi(ui, app, "Outline", "format.outline", json!({}));
-                    mi(ui, app, "Shadow", "format.shadow", json!({}));
-                    mi(ui, app, "Small Caps", "format.smallCaps", json!({}));
-                    mi(ui, app, "All Caps", "format.allCaps", json!({}));
-                    mi(ui, app, "Double Strikethrough", "format.doubleStrikethrough", json!({}));
-                });
+                if !essential {
+                    small(ui, app, "strike", None, "Strikethrough", "format.strikethrough", json!({}), flag("strike"));
+                    small(ui, app, "subscript", None, "Subscript", "format.subscript", json!({}), flag("subscript"));
+                    small(ui, app, "superscript", None, "Superscript", "format.superscript", json!({}), flag("superscript"));
+                    small(ui, app, "charborder", None, "Character Border", "format.border", json!({}), flag("border"));
+                    small(ui, app, "enclose", None, "Enclose Characters", "format.enclose", json!({}), false);
+                    ui.add_space(4.0);
+                    menu_button(ui, app, "effects", None, "Text Effects and Typography", false, "", |ui, app| {
+                        let theme = app.session.doc.settings.theme_colors.clone();
+                        crate::wordart_menus::style_gallery(ui, app, "format.textEffects");
+                        ui.separator();
+                        ui.menu_button(tl!("Text Fill"), |ui| crate::wordart_menus::fill_menu(ui, app, &theme));
+                        let outline = crate::wordart_menus::current_outline(app);
+                        ui.menu_button(tl!("Text Outline"), |ui| crate::wordart_menus::outline_menu(ui, app, &theme, outline));
+                        crate::wordart_menus::effects_menu(ui, app, &theme, false);
+                        ui.separator();
+                        mi(ui, app, "Outline", "format.outline", json!({}));
+                        mi(ui, app, "Shadow", "format.shadow", json!({}));
+                        mi(ui, app, "Small Caps", "format.smallCaps", json!({}));
+                        mi(ui, app, "All Caps", "format.allCaps", json!({}));
+                        mi(ui, app, "Double Strikethrough", "format.doubleStrikethrough", json!({}));
+                    });
+                }
                 let hl = app.canvas.last_highlight.clone();
                 split(
                     ui,
@@ -1185,6 +1202,9 @@ fn home(app: &mut WordApp, ui: &mut Ui) {
         });
     });
     group(ui, "Paragraph", Some("para.dialog"), app, |ui, app| {
+        // Essential level (embedded, narrow): bullets, numbering, indents, left/centre/right
+        // and line spacing; the rest waits for more room.
+        let essential = crate::ribbon_fit::essential(ui.ctx());
         let rp = app.session.doc.para_at(&app.session.sel.focus).map(|p| app.session.doc.styles.resolve_para(&p.props));
         // The buttons show alignment as seen on the page (Align Right is a right-to-left paragraph's start).
         let align = rp.as_ref().map(|r| r.align.visual(r.bidi)).unwrap_or_default();
@@ -1228,40 +1248,44 @@ fn home(app: &mut WordApp, ui: &mut Ui) {
                     mi(ui, app, "Restart at 1", "para.restartNumbering", json!({}));
                     mi(ui, app, "None", "para.numbering", json!({"off": true}));
                 });
-                split(ui, app, "multilevel", "Multilevel List", "para.multilevel", json!({}), lists.multilevel, None, |ui, app| {
-                    mi(ui, app, "1. 1.1. 1.1.1.", "para.multilevel", json!({"kind": "legal"}));
-                    mi(ui, app, "I. A. 1. a.", "para.multilevel", json!({"kind": "outline"}));
-                    ui.separator();
-                    // Lists linked to the heading styles: the headings carry the numbers. Each item
-                    // reads as its first three levels, number then (translated) style name.
-                    for (numbers, k) in [
-                        (["1", "1.1", "1.1.1"], "headings"),
-                        (["Article I.", "Section 1.01", "(a)"], "article"),
-                        (["I.", "A.", "1."], "outlineHeadings"),
-                        (["Chapter 1", "", ""], "chapter"),
-                    ] {
-                        let text = numbers
-                            .iter()
-                            .zip(["Heading 1", "Heading 2", "Heading 3"])
-                            .map(|(n, h)| if n.is_empty() { tl!(h).to_string() } else { format!("{} {}", tl!(n), tl!(h)) })
-                            .collect::<Vec<_>>()
-                            .join(" / ");
-                        mi_text(ui, app, &text, "list.multilevelPreset", json!({"preset": k}));
-                    }
-                    ui.separator();
-                    mi(ui, app, "Define New Multilevel List…", "list.define", json!({}));
-                    ui.separator();
-                    for lv in 0..5u64 {
-                        mi(ui, app, &format!("Change to Level {}", lv + 1), "para.listLevel", json!({"level": lv}));
-                    }
-                });
+                if !essential {
+                    split(ui, app, "multilevel", "Multilevel List", "para.multilevel", json!({}), lists.multilevel, None, |ui, app| {
+                        mi(ui, app, "1. 1.1. 1.1.1.", "para.multilevel", json!({"kind": "legal"}));
+                        mi(ui, app, "I. A. 1. a.", "para.multilevel", json!({"kind": "outline"}));
+                        ui.separator();
+                        // Lists linked to the heading styles: the headings carry the numbers. Each item
+                        // reads as its first three levels, number then (translated) style name.
+                        for (numbers, k) in [
+                            (["1", "1.1", "1.1.1"], "headings"),
+                            (["Article I.", "Section 1.01", "(a)"], "article"),
+                            (["I.", "A.", "1."], "outlineHeadings"),
+                            (["Chapter 1", "", ""], "chapter"),
+                        ] {
+                            let text = numbers
+                                .iter()
+                                .zip(["Heading 1", "Heading 2", "Heading 3"])
+                                .map(|(n, h)| if n.is_empty() { tl!(h).to_string() } else { format!("{} {}", tl!(n), tl!(h)) })
+                                .collect::<Vec<_>>()
+                                .join(" / ");
+                            mi_text(ui, app, &text, "list.multilevelPreset", json!({"preset": k}));
+                        }
+                        ui.separator();
+                        mi(ui, app, "Define New Multilevel List…", "list.define", json!({}));
+                        ui.separator();
+                        for lv in 0..5u64 {
+                            mi(ui, app, &format!("Change to Level {}", lv + 1), "para.listLevel", json!({"level": lv}));
+                        }
+                    });
+                }
                 ui.add_space(4.0);
                 small(ui, app, "outdent", None, "Decrease Indent", "para.outdent", json!({}), false);
                 small(ui, app, "indent", None, "Increase Indent", "para.indent", json!({}), false);
-                ui.add_space(4.0);
-                small(ui, app, "sort", None, "Sort", "para.sort", json!({}), false);
-                let marks = app.session.view.marks;
-                small(ui, app, "pilcrow", None, "Show/Hide ¶", "view.marks", json!({}), marks);
+                if !essential {
+                    ui.add_space(4.0);
+                    small(ui, app, "sort", None, "Sort", "para.sort", json!({}), false);
+                    let marks = app.session.view.marks;
+                    small(ui, app, "pilcrow", None, "Show/Hide ¶", "view.marks", json!({}), marks);
+                }
             });
             ui.add_space(3.0);
             crate::widgets::row(ui, |ui| {
@@ -1269,10 +1293,12 @@ fn home(app: &mut WordApp, ui: &mut Ui) {
                 small(ui, app, "alignLeft", None, "Align Left", "para.alignLeft", json!({}), align == A::Left);
                 small(ui, app, "alignCenter", None, "Center", "para.alignCenter", json!({}), align == A::Center);
                 small(ui, app, "alignRight", None, "Align Right", "para.alignRight", json!({}), align == A::Right);
-                small(ui, app, "justify", None, "Justify", "para.justify", json!({}), align == A::Justify);
-                ui.add_space(4.0);
-                small(ui, app, "textLtr", None, "Left-to-Right Text Direction", "para.ltr", json!({}), !rtl);
-                small(ui, app, "textRtl", None, "Right-to-Left Text Direction", "para.rtl", json!({}), rtl);
+                if !essential {
+                    small(ui, app, "justify", None, "Justify", "para.justify", json!({}), align == A::Justify);
+                    ui.add_space(4.0);
+                    small(ui, app, "textLtr", None, "Left-to-Right Text Direction", "para.ltr", json!({}), !rtl);
+                    small(ui, app, "textRtl", None, "Right-to-Left Text Direction", "para.rtl", json!({}), rtl);
+                }
                 ui.add_space(4.0);
                 menu_button(ui, app, "lineSpacing", None, "Line and Paragraph Spacing", false, "para.lineSpacing", |ui, app| {
                     for v in [1.0, 1.15, 1.5, 2.0, 2.5, 3.0] {
@@ -1283,28 +1309,40 @@ fn home(app: &mut WordApp, ui: &mut Ui) {
                     mi(ui, app, "Remove Space After Paragraph", "para.removeSpaceAfter", json!({}));
                     mi(ui, app, "Line Spacing Options…", "para.dialog", json!({}));
                 });
-                split(ui, app, "shading", "Shading", "para.shading", json!({"color": app.canvas.last_shading.clone()}), false, None, |ui, app| {
-                    mi(ui, app, "No Color", "para.shading", json!({"color": null}));
-                    let theme = app.session.doc.settings.theme_colors.clone();
-                    crate::colors::menu(ui, app, &theme, Target::cmd("para.shading").remember(Remember::Shading));
-                });
-                split(ui, app, "borders", "Borders", "para.borders", json!({"kind": "bottom"}), false, None, |ui, app| {
-                    for (l, k) in [
-                        ("Bottom Border", "bottom"),
-                        ("Top Border", "top"),
-                        ("Left Border", "left"),
-                        ("Right Border", "right"),
-                        ("No Border", "none"),
-                        ("All Borders", "all"),
-                        ("Outside Borders", "outside"),
-                        ("Inside Borders", "inside"),
-                    ] {
-                        mi(ui, app, l, "para.borders", json!({"kind": k}));
-                    }
-                    ui.separator();
-                    mi(ui, app, "Horizontal Line", "insert.horizontalLine", json!({}));
-                    mi(ui, app, "Borders and Shading…", "para.borders", json!({}));
-                });
+                if !essential {
+                    split(
+                        ui,
+                        app,
+                        "shading",
+                        "Shading",
+                        "para.shading",
+                        json!({"color": app.canvas.last_shading.clone()}),
+                        false,
+                        None,
+                        |ui, app| {
+                            mi(ui, app, "No Color", "para.shading", json!({"color": null}));
+                            let theme = app.session.doc.settings.theme_colors.clone();
+                            crate::colors::menu(ui, app, &theme, Target::cmd("para.shading").remember(Remember::Shading));
+                        },
+                    );
+                    split(ui, app, "borders", "Borders", "para.borders", json!({"kind": "bottom"}), false, None, |ui, app| {
+                        for (l, k) in [
+                            ("Bottom Border", "bottom"),
+                            ("Top Border", "top"),
+                            ("Left Border", "left"),
+                            ("Right Border", "right"),
+                            ("No Border", "none"),
+                            ("All Borders", "all"),
+                            ("Outside Borders", "outside"),
+                            ("Inside Borders", "inside"),
+                        ] {
+                            mi(ui, app, l, "para.borders", json!({"kind": k}));
+                        }
+                        ui.separator();
+                        mi(ui, app, "Horizontal Line", "insert.horizontalLine", json!({}));
+                        mi(ui, app, "Borders and Shading…", "para.borders", json!({}));
+                    });
+                }
             });
         });
     });
