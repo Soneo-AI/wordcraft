@@ -31,9 +31,18 @@ use wordcraft_ui_egui::{ControlRequest, Inbox, WordApp};
 const MAX_QUEUED: usize = 256;
 
 enum Pending {
-    Request { method: String, params: Value, resolve: js_sys::Function, reject: js_sys::Function },
+    Request {
+        method: String,
+        params: Value,
+        resolve: js_sys::Function,
+        reject: js_sys::Function,
+    },
     /// `save()`: the download hook hands the bytes to `resolve` instead of the browser.
-    Save { path: Option<String>, resolve: js_sys::Function, reject: js_sys::Function },
+    Save {
+        path: Option<String>,
+        resolve: js_sys::Function,
+        reject: js_sys::Function,
+    },
 }
 
 #[derive(Clone, Default)]

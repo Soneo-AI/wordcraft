@@ -653,6 +653,9 @@ pub fn status_bar(app: &mut WordApp, ui: &mut Ui) {
                             let _ = app.run("view.zoomOut", json!({}));
                         }
                     }
+                    // Embedded (KoAssist): no view switches and no Focus — the host's panel is
+                    // the window, Focus would paint it black.
+                    if app.embedded.is_none() {
                     ui.add_space(10.0);
                     let mode = app.session.view.mode;
                     let read = app.session.view.read_mode;
@@ -698,6 +701,7 @@ pub fn status_bar(app: &mut WordApp, ui: &mut Ui) {
                     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, focus));
                     if resp.clicked() {
                         let _ = app.run("view.focus", json!({}));
+                    }
                     }
                 });
                 if let Some((msg, at)) = &app.status_msg

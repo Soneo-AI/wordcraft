@@ -49,6 +49,7 @@ pub mod dialogs_ribbon;
 pub mod dialogs_smart_art;
 pub mod dialogs_table_style;
 pub mod dialogs_templates;
+pub mod embedded;
 pub mod equation_tab;
 /// The built-in file browser, for desktops without a system file dialog (#576).
 #[cfg(not(target_arch = "wasm32"))]
@@ -554,6 +555,9 @@ pub struct WordApp {
     pub mac_titlebar: chrome::MacTitleBar,
     /// Focus (#1678): the ribbon is dropped down from the Focus bar, over the page.
     pub(crate) focus_ribbon: bool,
+    /// KoAssist: WordCraft inside another app's panel, with the chrome the host asked for
+    /// ([`embedded`]); `None` is the usual window.
+    pub embedded: Option<embedded::Embedded>,
     control_rx: Option<std::sync::mpsc::Receiver<ControlRequest>>,
     shot_token: u64,
     queued_shots: Vec<(u64, f64, u32)>,
@@ -697,6 +701,7 @@ impl WordApp {
             dialog: None,
             colors: None,
             restrict: Default::default(),
+            embedded: None,
             status_msg: None,
             previews: previews::Previews::default(),
             integrated_titlebar: false,
@@ -1622,6 +1627,23 @@ impl WordApp {
                 self.ui.theme = if dark { theme::Appearance::Dark } else { theme::Appearance::Light };
                 json!({"dark": dark, "theme": self.ui.theme.code()})
             }
+            "ui.hostTokens" => {
+                // Embedded (KoAssist): colours the host lays over the interface theme, as
+                // `{"light": {"accent": "#0f4f4a", …}, "dark": {…}}` with the fields of
+                // [`theme::Tokens`] as keys (`#rgb`, `#rrggbb` or `#rrggbbaa`). A theme given as
+                // an empty object drops its overlay; a theme not given keeps what it has.
+                for (dark, key) in [(false, "light"), (true, "dark")] {
+                    if let Some(map) = p.get(key) {
+                        match theme::HostTokens::from_json(map) {
+                            Ok(tokens) => theme::set_host_tokens(dark, tokens),
+                            Err(e) => return Some(Err(format!("{key}: {e}"))),
+                        }
+                    }
+                }
+                // The egui visuals derive from the tokens: install the theme again.
+                self.applied_theme = None;
+                json!({"light": theme::host_token_count(false), "dark": theme::host_token_count(true)})
+            }
             "ui.theme" => {
                 // `light`, `dark` or `system` (follow the OS appearance); no value reads it.
                 if let Some(v) = s("value") {
@@ -2379,9 +2401,14 @@ impl WordApp {
             backstage::show(self, ui);
         } else if !self.has_document() {
             // No document open (#1129): the ribbon greyed out but for Help, and no page.
-            chrome::title_bar(self, ui);
+            // Embedded (KoAssist): no title bar, and the status bar only if the host wants it.
+            if self.embedded.is_none() {
+                chrome::title_bar(self, ui);
+            }
             ribbon::show(self, ui);
-            chrome::status_bar(self, ui);
+            if self.embedded.as_ref().is_none_or(|e| e.status_bar) {
+                chrome::status_bar(self, ui);
+            }
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |_| {});
         } else {
             let screen = chrome::Screen::of(&self.session.view);
@@ -2390,9 +2417,14 @@ impl WordApp {
             if screen != chrome::Screen::Normal {
                 chrome::screen_bar(self, ui, screen);
             } else {
-                chrome::title_bar(self, ui);
+                // Embedded (KoAssist): no title bar, and the status bar only if the host wants it.
+                if self.embedded.is_none() {
+                    chrome::title_bar(self, ui);
+                }
                 ribbon::show(self, ui);
-                chrome::status_bar(self, ui);
+                if self.embedded.as_ref().is_none_or(|e| e.status_bar) {
+                    chrome::status_bar(self, ui);
+                }
                 panes::show(self, ui);
             }
             let fill = if screen == chrome::Screen::Focus { chrome::FOCUS_CANVAS } else { t.canvas };
@@ -2798,6 +2830,7 @@ pub(crate) fn works_without_document(id: &str) -> bool {
             | "ui.keytips"
             | "ui.dark"
             | "ui.theme"
+            | "ui.hostTokens"
             | "ui.interfaceSize"
             | "ui.animations"
             | "ui.language"

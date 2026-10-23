@@ -301,7 +301,7 @@ pub struct Tokens {
 }
 
 impl Tokens {
-    pub fn light() -> Self {
+    fn light_base() -> Self {
         Tokens {
             dark: false,
             title_bar: Color32::from_rgb(0xF0, 0xF0, 0xF0),
@@ -366,7 +366,7 @@ impl Tokens {
             on_close: Color32::WHITE,
         }
     }
-    pub fn dark() -> Self {
+    fn dark_base() -> Self {
         Tokens {
             dark: true,
             title_bar: Color32::from_rgb(0x1F, 0x1F, 0x1F),
@@ -434,6 +434,16 @@ impl Tokens {
             on_close: Color32::WHITE,
         }
     }
+    /// The light palette, with the host's overlay if one is set ([`set_host_tokens`]).
+    pub fn light() -> Self {
+        host_overlay(Self::light_base(), false)
+    }
+
+    /// The dark palette, with the host's overlay if one is set ([`set_host_tokens`]).
+    pub fn dark() -> Self {
+        host_overlay(Self::dark_base(), true)
+    }
+
     pub fn get(ctx: &egui::Context) -> Tokens {
         if ctx.global_style().visuals.dark_mode { Tokens::dark() } else { Tokens::light() }
     }
@@ -811,6 +821,182 @@ fn visuals(t: &Tokens) -> Visuals {
 
 pub fn c32(c: wordcraft_doc::Rgb) -> Color32 {
     Color32::from_rgb(c.0, c.1, c.2)
+}
+
+/// Colours an embedding host lays over a palette (KoAssist, `ui.hostTokens`): token name → colour.
+/// Set once per theme ([`set_host_tokens`]); [`Tokens::light`] and [`Tokens::dark`] apply it.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct HostTokens(Vec<(String, Color32)>);
+
+static HOST_TOKENS: std::sync::RwLock<[Option<HostTokens>; 2]> = std::sync::RwLock::new([None, None]);
+
+/// The token names a host may set: the colour fields of [`Tokens`] that make up the chrome.
+pub const HOST_TOKEN_NAMES: &[&str] = &[
+    "title_bar",
+    "ribbon",
+    "tab_strip",
+    "canvas",
+    "panel",
+    "border",
+    "border_strong",
+    "text",
+    "text_dim",
+    "text_disabled",
+    "icon",
+    "hover",
+    "pressed",
+    "checked",
+    "accent",
+    "nav",
+    "accent_text",
+    "on_accent",
+    "input",
+    "input_border",
+    "group_label",
+    "ruler",
+    "ruler_margin",
+    "ruler_tick",
+    "status_bar",
+    "selection",
+    "find_highlight",
+    "page_shadow",
+    "menu",
+];
+
+impl HostTokens {
+    /// From `{"accent": "#0f4f4a", …}`. An unknown name is an error (a typo would otherwise do
+    /// nothing, silently); colours are `#rgb`, `#rrggbb` or `#rrggbbaa`.
+    pub fn from_json(v: &serde_json::Value) -> Result<Self, String> {
+        let Some(map) = v.as_object() else { return Err("expected an object of token colours".into()) };
+        let mut out = Vec::with_capacity(map.len());
+        for (name, value) in map {
+            if !HOST_TOKEN_NAMES.contains(&name.as_str()) {
+                return Err(format!("unknown token `{name}`"));
+            }
+            let Some(text) = value.as_str() else { return Err(format!("`{name}`: expected a colour string")) };
+            let Some(color) = parse_hex_color(text) else { return Err(format!("`{name}`: not a colour: {text:?}")) };
+            out.push((name.clone(), color));
+        }
+        Ok(HostTokens(out))
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+}
+
+/// Install (or, with an empty set, drop) the host's overlay for the light or dark palette.
+pub fn set_host_tokens(dark: bool, tokens: HostTokens) {
+    if let Ok(mut slots) = HOST_TOKENS.write() {
+        slots[usize::from(dark)] = if tokens.is_empty() { None } else { Some(tokens) };
+    }
+}
+
+/// How many tokens the host overlays on the light or dark palette.
+pub fn host_token_count(dark: bool) -> usize {
+    HOST_TOKENS.read().ok().and_then(|slots| slots[usize::from(dark)].as_ref().map(HostTokens::len)).unwrap_or(0)
+}
+
+fn host_overlay(mut t: Tokens, dark: bool) -> Tokens {
+    let Ok(slots) = HOST_TOKENS.read() else { return t };
+    let Some(host) = slots[usize::from(dark)].as_ref() else { return t };
+    for (name, color) in &host.0 {
+        let c = *color;
+        match name.as_str() {
+            "title_bar" => t.title_bar = c,
+            "ribbon" => t.ribbon = c,
+            "tab_strip" => t.tab_strip = c,
+            "canvas" => t.canvas = c,
+            "panel" => t.panel = c,
+            "border" => t.border = c,
+            "border_strong" => t.border_strong = c,
+            "text" => t.text = c,
+            "text_dim" => t.text_dim = c,
+            "text_disabled" => t.text_disabled = c,
+            "icon" => t.icon = c,
+            "hover" => t.hover = c,
+            "pressed" => t.pressed = c,
+            "checked" => t.checked = c,
+            "accent" => t.accent = c,
+            "nav" => t.nav = c,
+            "accent_text" => t.accent_text = c,
+            "on_accent" => t.on_accent = c,
+            "input" => t.input = c,
+            "input_border" => t.input_border = c,
+            "group_label" => t.group_label = c,
+            "ruler" => t.ruler = c,
+            "ruler_margin" => t.ruler_margin = c,
+            "ruler_tick" => t.ruler_tick = c,
+            "status_bar" => t.status_bar = c,
+            "selection" => t.selection = c,
+            "find_highlight" => t.find_highlight = c,
+            "page_shadow" => t.page_shadow = c,
+            "menu" => t.menu = c,
+            _ => {}
+        }
+    }
+    t
+}
+
+/// `#rgb`, `#rrggbb` or `#rrggbbaa` (case-insensitive) → colour; anything else → `None`.
+pub fn parse_hex_color(text: &str) -> Option<Color32> {
+    let hex = text.trim().strip_prefix('#')?;
+    let digit = |i: usize| u8::from_str_radix(hex.get(i..i + 1)?, 16).ok();
+    let byte = |i: usize| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok();
+    match hex.len() {
+        3 => Some(Color32::from_rgb(digit(0)? * 17, digit(1)? * 17, digit(2)? * 17)),
+        6 => Some(Color32::from_rgb(byte(0)?, byte(2)?, byte(4)?)),
+        8 => Some(Color32::from_rgba_unmultiplied(byte(0)?, byte(2)?, byte(4)?, byte(6)?)),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod host_tokens_tests {
+    use super::*;
+
+    #[test]
+    fn hex_colours_in_three_forms() {
+        assert_eq!(parse_hex_color("#0f4f4a"), Some(Color32::from_rgb(0x0F, 0x4F, 0x4A)));
+        assert_eq!(parse_hex_color("#FFF"), Some(Color32::WHITE));
+        assert_eq!(parse_hex_color(" #0f4f4a40 "), Some(Color32::from_rgba_unmultiplied(0x0F, 0x4F, 0x4A, 0x40)));
+        assert_eq!(parse_hex_color("0f4f4a"), None);
+        assert_eq!(parse_hex_color("#12345"), None);
+        assert_eq!(parse_hex_color("#gg0000"), None);
+    }
+
+    #[test]
+    fn unknown_names_and_bad_colours_are_errors() {
+        assert!(HostTokens::from_json(&serde_json::json!({"accent": "#0f4f4a"})).is_ok());
+        assert!(HostTokens::from_json(&serde_json::json!({"acent": "#0f4f4a"})).unwrap_err().contains("acent"));
+        assert!(HostTokens::from_json(&serde_json::json!({"accent": 12})).is_err());
+        assert!(HostTokens::from_json(&serde_json::json!({"accent": "teal"})).is_err());
+        assert!(HostTokens::from_json(&serde_json::json!([])).is_err());
+    }
+
+    #[test]
+    fn the_overlay_changes_only_what_the_host_set_and_can_be_dropped() {
+        let base = Tokens::light_base();
+        let host = HostTokens::from_json(&serde_json::json!({"accent": "#0f4f4a", "canvas": "#efeee9"})).unwrap();
+        let t = host_overlay(base, false);
+        // Not installed: nothing changes.
+        assert_eq!(t.accent, base.accent);
+        set_host_tokens(false, host);
+        let t = Tokens::light();
+        assert_eq!(t.accent, Color32::from_rgb(0x0F, 0x4F, 0x4A));
+        assert_eq!(t.canvas, Color32::from_rgb(0xEF, 0xEE, 0xE9));
+        assert_eq!(t.ribbon, base.ribbon, "untouched tokens keep the palette's colour");
+        assert_eq!(Tokens::dark().accent, Tokens::dark_base().accent, "the dark palette has no overlay");
+        assert_eq!(host_token_count(false), 2);
+        set_host_tokens(false, HostTokens::default());
+        assert_eq!(Tokens::light().accent, base.accent);
+        assert_eq!(host_token_count(false), 0);
+    }
 }
 
 #[cfg(test)]

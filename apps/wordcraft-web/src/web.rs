@@ -69,13 +69,18 @@ pub fn start() {
                     let mut session = Session::new(doc);
                     session.system_region = region;
                     let messages = Rc::new(RefCell::new(Vec::new()));
-                    let mut app = WordApp::new(session, services(inbox.clone(), cc.egui_ctx.clone(), dirty, saves.clone(), messages.clone(), bridge.clone()));
+                    let mut app =
+                        WordApp::new(session, services(inbox.clone(), cc.egui_ctx.clone(), dirty, saves.clone(), messages.clone(), bridge.clone()));
                     // Pasted pictures wait apart from dropped files: the app inserts one only when the page is the edit target (#1349).
                     app.services.pasted = Some(pasted);
                     app.autosave = false;
                     // Preferences from an earlier visit (#2132), as the desktop app reads `ui.json`.
                     let stored = stored_prefs();
                     crate::prefs::restore(&mut app, stored.as_deref());
+                    // KoAssist: options the page set before the start (`window.wordcraftOptions`)
+                    // win over the stored preferences — chrome, language, theme, colours.
+                    let host = crate::host_options::read();
+                    crate::host_options::apply(&mut app, &host);
                     // A region chosen in File › Options replaces the browser's for the first blank
                     // document too (#838).
                     if !sample && app.session.prefs.region.is_some() {
@@ -84,7 +89,8 @@ pub fn start() {
                     }
                     let prefs = crate::prefs::PrefsSync::new(stored);
                     // No document to show: start on File › Home, as the desktop app does (#766).
-                    if !sample {
+                    // Embedded (KoAssist): no start screen either, the page opens a document.
+                    if !sample && app.embedded.is_none() {
                         app.start_screen();
                     }
                     Ok(Box::new(WebShell { app, inbox, messages, prefs, bridge }))

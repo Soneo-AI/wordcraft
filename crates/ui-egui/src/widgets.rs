@@ -424,6 +424,10 @@ pub fn group(ui: &mut Ui, title: &str, launcher: Option<&str>, app: &mut WordApp
 
 /// A ribbon group whose title is shown as is (a custom group's name, Customize Ribbon).
 pub fn group_titled(ui: &mut Ui, id_title: &str, title: &str, launcher: Option<&str>, app: &mut WordApp, add: impl FnOnce(&mut Ui, &mut WordApp)) {
+    // Embedded (KoAssist): a group the host left out is neither drawn nor planned for.
+    if app.embedded.as_ref().is_some_and(|e| !e.shows_group(id_title)) {
+        return;
+    }
     let t = Tokens::get(ui.ctx());
     let start = ui.cursor().min;
     // #662: the window may be too narrow for the tab; the plan says how this group fits.
