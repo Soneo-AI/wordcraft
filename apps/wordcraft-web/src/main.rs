@@ -16,6 +16,8 @@ mod prefs;
 mod save_fallback;
 
 #[cfg(target_arch = "wasm32")]
+mod bridge;
+#[cfg(target_arch = "wasm32")]
 mod web;
 
 #[cfg(target_arch = "wasm32")]

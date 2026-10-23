@@ -32,6 +32,13 @@ pub fn start() {
         if let Err(e) = guard_unload(dirty.clone(), saves.clone()) {
             log::error!("no unsaved-changes guard: {e}");
         }
+        // KoAssist: the page drives the app through `window.wordcraft` (see `bridge.rs`).
+        let bridge = crate::bridge::Bridge::default();
+        let inbox: Inbox = Inbox::default();
+        if let Err(e) = bridge.install(inbox.clone()) {
+            log::error!("no JavaScript bridge: {e}");
+        }
+        let bridge_ready = bridge.clone();
         let mut options = eframe::WebOptions::default();
         if query().contains("webgl")
             && let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup
@@ -48,7 +55,8 @@ pub fn start() {
                     }
                     // Fonts the user added on an earlier visit (#582); the app notices them arrive.
                     font_store::load_all(cc.egui_ctx.clone());
-                    let inbox: Inbox = Inbox::default();
+                    let inbox = inbox.clone();
+                    bridge.attach(cc.egui_ctx.clone());
                     let pasted: Inbox = Inbox::default();
                     if let Err(e) = listen_for_pasted_pictures(pasted.clone(), cc.egui_ctx.clone()) {
                         log::error!("pasting pictures is unavailable: {e}");
@@ -61,7 +69,7 @@ pub fn start() {
                     let mut session = Session::new(doc);
                     session.system_region = region;
                     let messages = Rc::new(RefCell::new(Vec::new()));
-                    let mut app = WordApp::new(session, services(inbox.clone(), cc.egui_ctx.clone(), dirty, saves.clone(), messages.clone()));
+                    let mut app = WordApp::new(session, services(inbox.clone(), cc.egui_ctx.clone(), dirty, saves.clone(), messages.clone(), bridge.clone()));
                     // Pasted pictures wait apart from dropped files: the app inserts one only when the page is the edit target (#1349).
                     app.services.pasted = Some(pasted);
                     app.autosave = false;
@@ -79,15 +87,19 @@ pub fn start() {
                     if !sample {
                         app.start_screen();
                     }
-                    Ok(Box::new(WebShell { app, inbox, messages, prefs }))
+                    Ok(Box::new(WebShell { app, inbox, messages, prefs, bridge }))
                 }),
             )
             .await;
         if let Some(el) = document.get_element_by_id(LOADING_ID) {
-            match result {
+            match &result {
                 Ok(()) => el.remove(),
                 Err(e) => el.set_inner_html(&format!("<p>WordCraft failed to start: {e:?}</p><p>A browser with WebGPU or WebGL2 is required.</p>")),
             }
+        }
+        match result {
+            Ok(()) => bridge_ready.set_ready(),
+            Err(e) => bridge_ready.emit(serde_json::json!({"type": "error", "error": format!("{e:?}")})),
         }
     });
 }
@@ -103,6 +115,7 @@ struct WebShell {
     inbox: Inbox,
     messages: Rc<RefCell<Vec<String>>>,
     prefs: crate::prefs::PrefsSync,
+    bridge: crate::bridge::Bridge,
 }
 
 fn local_storage() -> Option<web_sys::Storage> {
@@ -135,6 +148,8 @@ impl eframe::App for WebShell {
         for msg in msgs {
             self.app.status(msg);
         }
+        // Requests from the page (KoAssist bridge) run on the UI thread, before this frame's logic.
+        self.bridge.drain(&mut self.app, ctx);
         self.app.logic(ctx);
         // Store changed preferences straight away: a reload or closed tab runs no exit code (#2132).
         if let Some(json) = self.prefs.changed(&self.app) {
@@ -206,11 +221,20 @@ fn listen_for_pasted_pictures(inbox: Inbox, ctx: egui::Context) -> Result<(), St
 }
 
 /// `dirty` is the flag the `beforeunload` guard reads ([`guard_unload`]).
-fn services(inbox: Inbox, ctx: egui::Context, dirty: Rc<Cell<bool>>, saves: AsyncSaves, messages: Rc<RefCell<Vec<String>>>) -> Services {
+fn services(
+    inbox: Inbox,
+    ctx: egui::Context,
+    dirty: Rc<Cell<bool>>,
+    saves: AsyncSaves,
+    messages: Rc<RefCell<Vec<String>>>,
+    bridge: crate::bridge::Bridge,
+) -> Services {
     let open_inbox = inbox.clone();
     let save_ctx = ctx.clone();
     let font_ctx = ctx.clone();
     let font_messages = messages.clone();
+    let bridge_download = bridge.clone();
+    let bridge_dirty = bridge;
     Services {
         open_async: Some(Box::new(move |purpose: &str| {
             let inbox = open_inbox.clone();
@@ -246,10 +270,19 @@ fn services(inbox: Inbox, ctx: egui::Context, dirty: Rc<Cell<bool>>, saves: Asyn
         // Exports ask for a name; the browser decides where the download goes.
         pick_save: Some(Box::new(|name: &str| Some(name.to_string()))),
         async_saves: Some(saves.clone()),
-        download: Some(Box::new(move |path: &str, bytes: &[u8]| download(&saves, &save_ctx, path, bytes))),
+        download: Some(Box::new(move |path: &str, bytes: &[u8]| {
+            // A pending `wordcraft.save()` takes the bytes; otherwise the browser downloads them.
+            if bridge_download.capture_download(bytes) {
+                return Ok(());
+            }
+            download(&saves, &save_ctx, path, bytes)
+        })),
         print: Some(Box::new(print_pdf)),
         inbox: Some(inbox),
-        on_dirty: Some(Box::new(move |d| dirty.set(d))),
+        on_dirty: Some(Box::new(move |d| {
+            dirty.set(d);
+            bridge_dirty.report_dirty(d);
+        })),
         animations_enabled: Some(animations_enabled()),
         store_font: Some(Box::new(font_store::store)),
         forget_font: Some(Box::new(font_store::forget)),
