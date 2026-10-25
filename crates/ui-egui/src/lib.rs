@@ -912,11 +912,21 @@ impl WordApp {
         r
     }
 
+    /// Embedded (KoAssist): whether a command is one the host app keeps for itself. `file.open`
+    /// WITH the document's bytes is the page (or a drop) handing over the document and stays
+    /// open; without them it would be the file picker.
+    fn embedded_refuses(&self, id: &str, params: &Value) -> bool {
+        if self.embedded.is_none() || !EMBEDDED_BLOCKED_COMMANDS.contains(&id) {
+            return false;
+        }
+        !(id == "file.open" && params.get("data").is_some())
+    }
+
     /// Run a command the user asked for (ribbon, shortcut, Backstage, file drop). New, Open,
     /// Close, Envelopes, Labels and Finish & Merge on a document with unsaved changes first ask
     /// Save / Don't Save / Cancel, and the command runs once that is answered (`ui.saveChanges`).
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
-        if self.embedded.is_some() && EMBEDDED_BLOCKED_COMMANDS.contains(&id) {
+        if self.embedded_refuses(id, &params) {
             self.status(tl!("Not available right now"));
             return Ok(json!({"ignored": id}));
         }
@@ -1003,7 +1013,7 @@ impl WordApp {
     pub fn execute(&mut self, id: &str, params: Value) -> Result<Value, String> {
         // Embedded (KoAssist): the host owns the file here too — a page or agent must not
         // replace the open document or trigger a download.
-        if self.embedded.is_some() && EMBEDDED_BLOCKED_COMMANDS.contains(&id) {
+        if self.embedded_refuses(id, &params) {
             return Err(format!("`{id}` is not available in the embedded editor: the host app opens, saves and exports the document"));
         }
         // A pending Change Picture only survives until the next action (#147).
