@@ -9,7 +9,8 @@
 //! wordcraft.request(method, params)      // Promise<result>: any control method
 //!                                        // (engine.execute, document.inspect, ui.inspect, …)
 //! wordcraft.execute(command, params)     // Promise<result>: shorthand for engine.execute
-//! wordcraft.save(path?)                  // Promise<Uint8Array>: the document's bytes, no download
+//! wordcraft.save(path?)                  // Promise<{bytes: Uint8Array, name}>: the document's bytes
+//!                                        // and the name it was opened under, no download
 //! wordcraft.onEvent(callback)            // callback({type: "ready" | "dirty", …})
 //! wordcraft.ready                        // true once the app runs
 //! ```
@@ -92,11 +93,15 @@ impl Bridge {
     }
 
     /// `Services::download` hook: while a `save()` is pending, the bytes go to the page
-    /// instead of the browser's download. Returns `true` when it took them.
-    pub fn capture_download(&self, bytes: &[u8]) -> bool {
+    /// instead of the browser's download, with the name the document carries (what `open`
+    /// was given, or the app's default for a document it created itself) — the page checks
+    /// that it is still its document before it stores the bytes. Returns `true` when it took them.
+    pub fn capture_download(&self, path: &str, bytes: &[u8]) -> bool {
         let Some(resolve) = self.save_sink.borrow_mut().take() else { return false };
-        let array = js_sys::Uint8Array::from(bytes);
-        let _ = resolve.call1(&JsValue::NULL, &array);
+        let result = js_sys::Object::new();
+        let _ = js_sys::Reflect::set(&result, &"bytes".into(), &js_sys::Uint8Array::from(bytes));
+        let _ = js_sys::Reflect::set(&result, &"name".into(), &JsValue::from_str(path));
+        let _ = resolve.call1(&JsValue::NULL, &result);
         true
     }
 

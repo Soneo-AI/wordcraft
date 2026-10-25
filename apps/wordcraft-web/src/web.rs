@@ -69,8 +69,12 @@ pub fn start() {
                     let mut session = Session::new(doc);
                     session.system_region = region;
                     let messages = Rc::new(RefCell::new(Vec::new()));
-                    let mut app =
-                        WordApp::new(session, services(inbox.clone(), cc.egui_ctx.clone(), dirty, saves.clone(), messages.clone(), bridge.clone()));
+                    // KoAssist: options the page set before the start (`window.wordcraftOptions`).
+                    let host = crate::host_options::read();
+                    let mut app = WordApp::new(
+                        session,
+                        services(inbox.clone(), cc.egui_ctx.clone(), dirty, saves.clone(), messages.clone(), bridge.clone(), host.embedded.is_some()),
+                    );
                     // Pasted pictures wait apart from dropped files: the app inserts one only when the page is the edit target (#1349).
                     app.services.pasted = Some(pasted);
                     app.autosave = false;
@@ -79,7 +83,6 @@ pub fn start() {
                     crate::prefs::restore(&mut app, stored.as_deref());
                     // KoAssist: options the page set before the start (`window.wordcraftOptions`)
                     // win over the stored preferences — chrome, language, theme, colours.
-                    let host = crate::host_options::read();
                     crate::host_options::apply(&mut app, &host);
                     // A region chosen in File › Options replaces the browser's for the first blank
                     // document too (#838).
@@ -234,6 +237,7 @@ fn services(
     saves: AsyncSaves,
     messages: Rc<RefCell<Vec<String>>>,
     bridge: crate::bridge::Bridge,
+    embedded: bool,
 ) -> Services {
     let open_inbox = inbox.clone();
     let save_ctx = ctx.clone();
@@ -278,7 +282,13 @@ fn services(
         async_saves: Some(saves.clone()),
         download: Some(Box::new(move |path: &str, bytes: &[u8]| {
             // A pending `wordcraft.save()` takes the bytes; otherwise the browser downloads them.
-            if bridge_download.capture_download(bytes) {
+            if bridge_download.capture_download(path, bytes) {
+                return Ok(());
+            }
+            // Embedded (KoAssist): a save the person asked for (Ctrl+S, the Save entry) is the
+            // page's to make — it hears `saveRequested` and stores the document itself.
+            if embedded {
+                bridge_download.emit(serde_json::json!({"type": "saveRequested", "path": path}));
                 return Ok(());
             }
             download(&saves, &save_ctx, path, bytes)

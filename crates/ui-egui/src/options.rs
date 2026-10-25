@@ -120,6 +120,10 @@ pub const UNITS: [(Unit, &str); 5] = [
     (Unit::Picas, "Picas"),
 ];
 
+/// Embedded (KoAssist): panes about files, start-up, the author name and the control channel
+/// belong to the host app, not to the editor of one document.
+const EMBEDDED_HIDDEN_PANES: [&str; 3] = ["general", "save", "agents"];
+
 /// The pane names, in [`PANES`] order.
 fn pane_label(id: &str) -> &'static str {
     match id {
@@ -139,11 +143,16 @@ pub fn page(app: &mut WordApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     ui.label(RichText::new(tl!("Options")).font(semibold(26.0)));
     ui.add_space(16.0);
+    let embedded = app.embedded.is_some();
     let current = if PANES.contains(&app.ui.options_pane.as_str()) { app.ui.options_pane.clone() } else { "general".to_string() };
+    let current = if embedded && EMBEDDED_HIDDEN_PANES.contains(&current.as_str()) { "display".to_string() } else { current };
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
             ui.set_width(170.0);
             for id in PANES {
+                if embedded && EMBEDDED_HIDDEN_PANES.contains(&id) {
+                    continue;
+                }
                 let label = tl!(pane_label(id));
                 let active = current == id;
                 let (r, resp) = ui.allocate_exact_size(vec2(170.0, 30.0), egui::Sense::click());
@@ -455,10 +464,13 @@ fn save(app: &mut WordApp, ui: &mut Ui) {
 }
 
 fn language(app: &mut WordApp, ui: &mut Ui) {
-    section(ui, "Interface language");
-    language_picker(app, ui);
-    // #414 (detect the document's language) goes here.
-    ui.add_space(8.0);
+    // Embedded (KoAssist): the interface language is the host's setting.
+    if app.embedded.is_none() {
+        section(ui, "Interface language");
+        language_picker(app, ui);
+        // #414 (detect the document's language) goes here.
+        ui.add_space(8.0);
+    }
     section(ui, "Proofing language");
     // The document's default language (Review › Language › Set As Default changes it).
     let tag = app.session.doc.styles.default_chr.lang.clone();

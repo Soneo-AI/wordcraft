@@ -522,6 +522,29 @@ fn migrate_units(v: &mut Value) {
 }
 
 /// The application.
+/// Embedded (KoAssist): the host app opens, saves, exports and closes the document; these
+/// commands (shortcuts, Backstage, menus) only say so instead of doing it here.
+const EMBEDDED_BLOCKED_COMMANDS: &[&str] = &[
+    "file.new",
+    "file.newFromTemplate",
+    "file.open",
+    "file.saveAs",
+    "file.saveTemplate",
+    "file.print",
+    "file.printPdf",
+    "file.printMarkup",
+    "file.exportPdf",
+    "file.exportPng",
+    "file.close",
+    "file.recover",
+    "file.share",
+    "file.rename",
+    "ui.openFileDialog",
+    "ui.fileBrowser",
+    "ui.discord",
+    "ui.makeDefaultApp",
+];
+
 pub struct WordApp {
     pub session: Session,
     pub ui: UiState,
@@ -893,6 +916,10 @@ impl WordApp {
     /// Close, Envelopes, Labels and Finish & Merge on a document with unsaved changes first ask
     /// Save / Don't Save / Cancel, and the command runs once that is answered (`ui.saveChanges`).
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        if self.embedded.is_some() && EMBEDDED_BLOCKED_COMMANDS.contains(&id) {
+            self.status(tl!("Not available right now"));
+            return Ok(json!({"ignored": id}));
+        }
         // Comment text still being typed is written first, so a save or export has it and a
         // close, New or Open counts it as a change (#1348). A draft the document refuses is not
         // part of it: saving and exporting go on without it (the refusal stays on the status
@@ -974,6 +1001,11 @@ impl WordApp {
     /// Run a command for a script or an agent (control channel, MCP bridge): never asks first.
     /// UI-level commands (`ui.*`) are handled here, the rest by the engine.
     pub fn execute(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        // Embedded (KoAssist): the host owns the file here too — a page or agent must not
+        // replace the open document or trigger a download.
+        if self.embedded.is_some() && EMBEDDED_BLOCKED_COMMANDS.contains(&id) {
+            return Err(format!("`{id}` is not available in the embedded editor: the host app opens, saves and exports the document"));
+        }
         // A pending Change Picture only survives until the next action (#147).
         if !matches!(id, "ui.changePicture" | "picture.change" | "insert.picture") {
             self.change_picture_target = None;
@@ -1539,6 +1571,10 @@ impl WordApp {
                 }
                 if let Some(pane) = s("pane") {
                     self.ui.options_pane = pane.into();
+                }
+                // Embedded (KoAssist): Options is the only page.
+                if self.embedded.is_some() {
+                    self.ui.backstage_page = "options".into();
                 }
                 json!({"backstage": self.ui.backstage})
             }

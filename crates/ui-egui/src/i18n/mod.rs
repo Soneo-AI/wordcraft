@@ -439,33 +439,40 @@ pub fn product_name() -> &'static str {
 
 fn brand(s: &str) -> &str {
     let Some(name) = PRODUCT_NAME.get() else { return s };
-    if name.is_empty() || name == "WordCraft" || !s.contains("WordCraft") {
-        return s;
-    }
+    let Some(replaced) = branded_text(s, name) else { return s };
     let mut cache = BRANDED.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((_, out)) = cache.iter().find(|(original, _)| original == s) {
         return out;
     }
-    let out: &'static str = Box::leak(s.replace("WordCraft", name).into_boxed_str());
+    let out: &'static str = Box::leak(replaced.into_boxed_str());
     cache.push((s.to_string(), out));
     out
+}
+
+/// `s` with "WordCraft" replaced by `name`, or `None` when there is nothing to replace (no
+/// product name worth the name, or a label that doesn't mention WordCraft).
+fn branded_text(s: &str, name: &str) -> Option<String> {
+    if name.is_empty() || name == "WordCraft" || !s.contains("WordCraft") {
+        return None;
+    }
+    Some(s.replace("WordCraft", name))
 }
 
 #[cfg(test)]
 mod brand_tests {
     use super::*;
 
+    /// Pure: the process-wide name stays unset here, other tests look for WordCraft's own labels.
     #[test]
-    fn a_host_name_replaces_wordcraft_in_labels_once() {
-        // The name is process-wide and set once; the test accepts either outcome of the race
-        // with another test, but never a label that still says WordCraft once a name is set.
-        set_product_name("KoAssist");
-        let name = product_name();
-        let a = brand("WordCraft is now the default app for Word documents.");
-        let b = brand("WordCraft is now the default app for Word documents.");
-        assert_eq!(a, format!("{name} is now the default app for Word documents."));
-        assert!(std::ptr::eq(a, b), "cached, not leaked again");
-        assert_eq!(brand("Bold"), "Bold");
+    fn a_host_name_replaces_wordcraft_in_a_label() {
+        assert_eq!(
+            branded_text("WordCraft is now the default app for Word documents.", "KoAssist").as_deref(),
+            Some("KoAssist is now the default app for Word documents.")
+        );
+        assert_eq!(branded_text("Bold", "KoAssist"), None);
+        assert_eq!(branded_text("WordCraft", ""), None);
+        assert_eq!(branded_text("WordCraft", "WordCraft"), None);
+        assert_eq!(brand("WordCraft"), "WordCraft", "no name set: labels pass through");
     }
 }
 
