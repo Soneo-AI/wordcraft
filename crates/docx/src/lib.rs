@@ -164,3 +164,15 @@ pub enum DocxError {
     #[error("encrypted document: {0}")]
     Encryption(String),
 }
+
+/// The application name written to `docProps/app.xml`: "WordCraft", or what an embedding host
+/// sets once at start ([`set_application_name`], KoAssist).
+static APPLICATION_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+pub fn set_application_name(name: &str) {
+    let _ = APPLICATION_NAME.set(name.trim().to_string());
+}
+
+pub fn application_name() -> &'static str {
+    APPLICATION_NAME.get().map(String::as_str).filter(|n| !n.is_empty()).unwrap_or("WordCraft")
+}

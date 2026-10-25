@@ -1627,6 +1627,23 @@ impl WordApp {
                 self.ui.theme = if dark { theme::Appearance::Dark } else { theme::Appearance::Light };
                 json!({"dark": dark, "theme": self.ui.theme.code()})
             }
+            "ui.embedded" => {
+                // Embedded (KoAssist): change what the host shows while running — `tabs`,
+                // `hidden_groups` (lists of English names), `status_bar` (bool); no value reads.
+                // Outside the embedded mode there is nothing to set.
+                let Some(e) = self.embedded.as_mut() else { return Some(Ok(json!({"embedded": false}))) };
+                let names = |v: &Value| v.as_array().map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect::<Vec<_>>());
+                if let Some(tabs) = p.get("tabs").and_then(names) {
+                    e.tabs = tabs;
+                }
+                if let Some(groups) = p.get("hidden_groups").and_then(names) {
+                    e.hidden_groups = groups;
+                }
+                if let Some(on) = p.get("status_bar").and_then(Value::as_bool) {
+                    e.status_bar = on;
+                }
+                json!({"embedded": true, "tabs": e.tabs, "hidden_groups": e.hidden_groups, "status_bar": e.status_bar})
+            }
             "ui.hostTokens" => {
                 // Embedded (KoAssist): colours the host lays over the interface theme, as
                 // `{"light": {"accent": "#0f4f4a", …}, "dark": {…}}` with the fields of
@@ -2448,14 +2465,17 @@ impl WordApp {
         if let Some(url) = self.canvas.open_url.take() {
             ctx.open_url(egui::OpenUrl::new_tab(url));
         }
-        let title = if self.has_document() {
-            format!("{}{} - WordCraft", self.title_stem(), if self.session.dirty { " •" } else { "" })
-        } else {
-            "WordCraft".to_string()
-        };
-        if title != self.sent_title {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
-            self.sent_title = title;
+        // Embedded (KoAssist): the host page owns its title; the app sends none.
+        if self.embedded.is_none() {
+            let title = if self.has_document() {
+                format!("{}{} - WordCraft", self.title_stem(), if self.session.dirty { " •" } else { "" })
+            } else {
+                "WordCraft".to_string()
+            };
+            if title != self.sent_title {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
+                self.sent_title = title;
+            }
         }
         self.sync_full_screen(&ctx);
         self.frame_ms = now_ms() - t0;
@@ -2836,6 +2856,7 @@ pub(crate) fn works_without_document(id: &str) -> bool {
             | "ui.dark"
             | "ui.theme"
             | "ui.hostTokens"
+            | "ui.embedded"
             | "ui.interfaceSize"
             | "ui.animations"
             | "ui.language"

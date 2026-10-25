@@ -412,13 +412,61 @@ pub fn lowercase(s: &str) -> String {
     out
 }
 
-/// `s` in `lang`; strings without a translation come back unchanged.
+/// `s` in `lang`; strings without a translation come back unchanged. A host's product name
+/// ([`set_product_name`]) replaces "WordCraft" on the way out.
 pub fn tr(lang: Lang, s: &str) -> &str {
     #[cfg(test)]
     if pseudo::on() {
         return pseudo::mark(s);
     }
-    lang.catalog().plain(s).unwrap_or(s)
+    brand(lang.catalog().plain(s).unwrap_or(s))
+}
+
+/// The product name an embedding host shows in place of "WordCraft" (KoAssist). Set once at
+/// start; every label that names WordCraft is rewritten on its way out of [`tr`] and cached.
+static PRODUCT_NAME: OnceLock<String> = OnceLock::new();
+/// Rewritten labels, by their original text: a label is leaked once, never per frame.
+static BRANDED: std::sync::Mutex<Vec<(String, &'static str)>> = std::sync::Mutex::new(Vec::new());
+
+pub fn set_product_name(name: &str) {
+    let _ = PRODUCT_NAME.set(name.trim().to_string());
+}
+
+/// What the interface calls the app: "WordCraft", or the host's name.
+pub fn product_name() -> &'static str {
+    PRODUCT_NAME.get().map(String::as_str).filter(|n| !n.is_empty()).unwrap_or("WordCraft")
+}
+
+fn brand(s: &str) -> &str {
+    let Some(name) = PRODUCT_NAME.get() else { return s };
+    if name.is_empty() || name == "WordCraft" || !s.contains("WordCraft") {
+        return s;
+    }
+    let mut cache = BRANDED.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((_, out)) = cache.iter().find(|(original, _)| original == s) {
+        return out;
+    }
+    let out: &'static str = Box::leak(s.replace("WordCraft", name).into_boxed_str());
+    cache.push((s.to_string(), out));
+    out
+}
+
+#[cfg(test)]
+mod brand_tests {
+    use super::*;
+
+    #[test]
+    fn a_host_name_replaces_wordcraft_in_labels_once() {
+        // The name is process-wide and set once; the test accepts either outcome of the race
+        // with another test, but never a label that still says WordCraft once a name is set.
+        set_product_name("KoAssist");
+        let name = product_name();
+        let a = brand("WordCraft is now the default app for Word documents.");
+        let b = brand("WordCraft is now the default app for Word documents.");
+        assert_eq!(a, format!("{name} is now the default app for Word documents."));
+        assert!(std::ptr::eq(a, b), "cached, not leaked again");
+        assert_eq!(brand("Bold"), "Bold");
+    }
 }
 
 /// A style's name as the interface shows it: built-in styles (`Normal`, `Heading 2`, `TOC 3`) in

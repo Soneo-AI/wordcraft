@@ -27,6 +27,10 @@ pub struct HostOptions {
     pub theme: Option<String>,
     pub ruler: Option<bool>,
     pub tokens: Option<Value>,
+    /// The signed-in person's name: author of comments and tracked changes, `lastModifiedBy`.
+    pub author: Option<String>,
+    /// What the interface and the saved file call the app instead of "WordCraft".
+    pub product_name: Option<String>,
 }
 
 /// `window.wordcraftOptions`, if the page set it.
@@ -66,12 +70,22 @@ pub fn from_value(value: &Value) -> HostOptions {
         theme: value.get("theme").and_then(Value::as_str).map(str::to_string),
         ruler: value.get("ruler").and_then(Value::as_bool),
         tokens: value.get("tokens").filter(|t| t.is_object()).cloned(),
+        author: value.get("author").and_then(Value::as_str).map(str::trim).filter(|a| !a.is_empty()).map(str::to_string),
+        product_name: value.get("product_name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty()).map(str::to_string),
     }
 }
 
 /// Apply the options to the app (before its first frame).
 pub fn apply(app: &mut WordApp, options: &HostOptions) {
     app.embedded = options.embedded.clone();
+    if let Some(name) = &options.product_name {
+        wordcraft_ui_egui::i18n::set_product_name(name);
+        wordcraft_docx::set_application_name(name);
+    }
+    if let Some(author) = &options.author {
+        app.session.author = author.clone();
+        app.ui.author = author.clone();
+    }
     let mut run = |command: &str, params: Value| {
         if let Err(e) = app.run(command, params) {
             log::warn!("wordcraftOptions: {command}: {e}");
