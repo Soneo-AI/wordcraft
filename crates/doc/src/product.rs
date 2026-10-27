@@ -18,9 +18,20 @@ pub fn set_product_name(name: &str) {
     }
 }
 
-/// What files call the application: "WordCraft", or the host's name.
+/// The name from the environment (`KOASSIST_PRODUCT_NAME`), read once — the headless CLI has no
+/// host that calls [`set_product_name`]; a sandbox sets the variable per run. Absent on wasm.
+static ENV_NAME: OnceLock<Option<String>> = OnceLock::new();
+
+/// What files call the application: the host's name, else `KOASSIST_PRODUCT_NAME`, else
+/// "WordCraft".
 pub fn product_name() -> &'static str {
-    PRODUCT_NAME.get().map(String::as_str).unwrap_or(DEFAULT)
+    if let Some(name) = PRODUCT_NAME.get() {
+        return name;
+    }
+    ENV_NAME
+        .get_or_init(|| std::env::var("KOASSIST_PRODUCT_NAME").ok().map(|n| n.trim().to_string()).filter(|n| !n.is_empty()))
+        .as_deref()
+        .unwrap_or(DEFAULT)
 }
 
 #[cfg(test)]
