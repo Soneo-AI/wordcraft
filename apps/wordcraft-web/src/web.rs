@@ -13,11 +13,14 @@ const DOC_EXTS: &[&str] = &["docx", "docm", "dotx", "dotm", "doc", "dot", "odt",
 const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "wmf", "emf"];
 const RECIPIENT_EXTS: &[&str] = wordcraft_engine::cmd::mailings::RECIPIENT_EXTENSIONS;
 mod font_store;
-const CANVAS_ID: &str = "wordcraft_canvas";
-const LOADING_ID: &str = "wordcraft_loading";
+// KoAssist: the page names the canvas after the product (`window.koassistDoc` is the bridge).
+const CANVAS_ID: &str = "koassist_doc_canvas";
+const LOADING_ID: &str = "koassist_doc_loading";
 
 pub fn start() {
-    eframe::WebLogger::init(log::LevelFilter::Info).ok();
+    // KoAssist: embedded, only warnings reach the console (log targets name the crates).
+    let level = if crate::host_options::read().embedded.is_some() { log::LevelFilter::Warn } else { log::LevelFilter::Info };
+    eframe::WebLogger::init(level).ok();
     wasm_bindgen_futures::spawn_local(async {
         let Some(document) = web_sys::window().and_then(|w| w.document()) else {
             log::error!("no document");
@@ -32,7 +35,7 @@ pub fn start() {
         if let Err(e) = guard_unload(dirty.clone(), saves.clone()) {
             log::error!("no unsaved-changes guard: {e}");
         }
-        // KoAssist: the page drives the app through `window.wordcraft` (see `bridge.rs`).
+        // KoAssist: the page drives the app through `window.koassistDoc` (see `bridge.rs`).
         let bridge = crate::bridge::Bridge::default();
         let inbox: Inbox = Inbox::default();
         if let Err(e) = bridge.install(inbox.clone()) {
@@ -51,7 +54,7 @@ pub fn start() {
                 options,
                 Box::new(move |cc| {
                     if let Some(rs) = &cc.wgpu_render_state {
-                        log::info!("wordcraft-web: wgpu backend {:?}", rs.adapter.get_info().backend);
+                        log::info!("koassist-doc: wgpu backend {:?}", rs.adapter.get_info().backend);
                     }
                     // Fonts the user added on an earlier visit (#582); the app notices them arrive.
                     font_store::load_all(cc.egui_ctx.clone());
@@ -69,7 +72,7 @@ pub fn start() {
                     let mut session = Session::new(doc);
                     session.system_region = region;
                     let messages = Rc::new(RefCell::new(Vec::new()));
-                    // KoAssist: options the page set before the start (`window.wordcraftOptions`).
+                    // KoAssist: options the page set before the start (`window.koassistDocOptions`).
                     let host = crate::host_options::read();
                     let mut app = WordApp::new(
                         session,
@@ -81,7 +84,7 @@ pub fn start() {
                     // Preferences from an earlier visit (#2132), as the desktop app reads `ui.json`.
                     let stored = stored_prefs();
                     crate::prefs::restore(&mut app, stored.as_deref());
-                    // KoAssist: options the page set before the start (`window.wordcraftOptions`)
+                    // KoAssist: options the page set before the start (`window.koassistDocOptions`)
                     // win over the stored preferences — chrome, language, theme, colours.
                     crate::host_options::apply(&mut app, &host);
                     // A region chosen in File › Options replaces the browser's for the first blank
@@ -281,7 +284,7 @@ fn services(
         pick_save: Some(Box::new(|name: &str| Some(name.to_string()))),
         async_saves: Some(saves.clone()),
         download: Some(Box::new(move |path: &str, bytes: &[u8]| {
-            // A pending `wordcraft.save()` takes the bytes; otherwise the browser downloads them.
+            // A pending `koassistDoc.save()` takes the bytes; otherwise the browser downloads them.
             if bridge_download.capture_download(path, bytes) {
                 return Ok(());
             }
@@ -587,7 +590,7 @@ fn trigger_anchor_download(window: &web_sys::Window, name: &str, bytes: &[u8]) -
 }
 
 /// The hidden iframe the last print loaded its PDF into.
-const PRINT_FRAME_ID: &str = "wordcraft-print-frame";
+const PRINT_FRAME_ID: &str = "koassist-doc-print-frame";
 
 /// Opens `bytes` (a PDF) as an object URL in a hidden iframe and calls the
 /// iframe's own `print()` once it has finished loading — this is the

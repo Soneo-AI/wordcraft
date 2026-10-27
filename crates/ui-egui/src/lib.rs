@@ -2514,9 +2514,9 @@ impl WordApp {
         // Embedded (KoAssist): the host page owns its title; the app sends none.
         if self.embedded.is_none() {
             let title = if self.has_document() {
-                format!("{}{} - WordCraft", self.title_stem(), if self.session.dirty { " •" } else { "" })
+                format!("{}{} - {}", self.title_stem(), if self.session.dirty { " •" } else { "" }, crate::i18n::product_name())
             } else {
-                "WordCraft".to_string()
+                crate::i18n::product_name().to_string()
             };
             if title != self.sent_title {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));

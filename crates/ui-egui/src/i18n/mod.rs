@@ -430,6 +430,8 @@ static BRANDED: std::sync::Mutex<Vec<(String, &'static str)>> = std::sync::Mutex
 
 pub fn set_product_name(name: &str) {
     let _ = PRODUCT_NAME.set(name.trim().to_string());
+    // Files name the product too (app.xml, HTML generator, PDF metadata, default author).
+    wordcraft_doc::product::set_product_name(name);
 }
 
 /// What the interface calls the app: "WordCraft", or the host's name.

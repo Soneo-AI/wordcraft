@@ -166,13 +166,12 @@ pub enum DocxError {
 }
 
 /// The application name written to `docProps/app.xml`: "WordCraft", or what an embedding host
-/// sets once at start ([`set_application_name`], KoAssist).
-static APPLICATION_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
-
+/// sets once at start ([`set_application_name`], KoAssist) — the one product name every file
+/// format shares (`wordcraft_doc::product`).
 pub fn set_application_name(name: &str) {
-    let _ = APPLICATION_NAME.set(name.trim().to_string());
+    wordcraft_doc::product::set_product_name(name);
 }
 
 pub fn application_name() -> &'static str {
-    APPLICATION_NAME.get().map(String::as_str).filter(|n| !n.is_empty()).unwrap_or("WordCraft")
+    wordcraft_doc::product::product_name()
 }

@@ -2674,6 +2674,14 @@ fn body(app: &mut WordApp, ui: &mut Ui, d: &mut Dialog) -> bool {
         }
         Dialog::About { tab } => {
             ui.set_width(660.0);
+            // An embedding host's product (KoAssist): its name and version, none of the upstream
+            // links, credits or notices (those live on the host's own licences page).
+            if crate::i18n::product_name() != "WordCraft" {
+                ui.label(egui::RichText::new(crate::i18n::product_name()).font(semibold(22.0)));
+                ui.label(crate::i18n::fmt(tl!("Version {version} ({build})"), &[("version", env!("CARGO_PKG_VERSION")), ("build", "web")]));
+                let (ok, cancel) = buttons(ui, tl!("Close"));
+                return ok || cancel;
+            }
             ui.horizontal(|ui| {
                 for (i, l) in ["About", "Contributors", "Models"].into_iter().enumerate() {
                     let i = i as u8;

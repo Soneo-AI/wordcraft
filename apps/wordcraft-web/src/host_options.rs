@@ -1,9 +1,9 @@
 //! Options the embedding page sets before WordCraft starts (KoAssist).
 //!
-//! The page assigns `window.wordcraftOptions` before it loads the bundle:
+//! The page assigns `window.koassistDocOptions` before it loads the bundle:
 //!
 //! ```js
-//! window.wordcraftOptions = {
+//! window.koassistDocOptions = {
 //!   embedded: { tabs: ["Home", "Insert"], hidden_groups: ["Clipboard"], status_bar: true },
 //!   language: "de",              // ui.language
 //!   theme: "light" | "dark" | "system",   // ui.theme
@@ -33,10 +33,10 @@ pub struct HostOptions {
     pub product_name: Option<String>,
 }
 
-/// `window.wordcraftOptions`, if the page set it.
+/// `window.koassistDocOptions`, if the page set it.
 pub fn read() -> HostOptions {
     let Some(window) = web_sys::window() else { return HostOptions::default() };
-    let Ok(raw) = js_sys::Reflect::get(&window, &"wordcraftOptions".into()) else { return HostOptions::default() };
+    let Ok(raw) = js_sys::Reflect::get(&window, &"koassistDocOptions".into()) else { return HostOptions::default() };
     if raw.is_undefined() || raw.is_null() {
         return HostOptions::default();
     }
@@ -44,7 +44,7 @@ pub fn read() -> HostOptions {
     let value: Value = match text.as_deref().map(serde_json::from_str::<Value>) {
         Some(Ok(v)) => v,
         _ => {
-            log::warn!("wordcraftOptions: not JSON; ignored");
+            log::warn!("koassistDocOptions: not JSON; ignored");
             return HostOptions::default();
         }
     };
@@ -59,7 +59,7 @@ pub fn from_value(value: &Value) -> HostOptions {
         Some(other) => match serde_json::from_value::<Embedded>(other.clone()) {
             Ok(e) => Some(e),
             Err(e) => {
-                log::warn!("wordcraftOptions.embedded: {e}; using the defaults");
+                log::warn!("koassistDocOptions.embedded: {e}; using the defaults");
                 Some(Embedded::default())
             }
         },
@@ -88,7 +88,7 @@ pub fn apply(app: &mut WordApp, options: &HostOptions) {
     }
     let mut run = |command: &str, params: Value| {
         if let Err(e) = app.run(command, params) {
-            log::warn!("wordcraftOptions: {command}: {e}");
+            log::warn!("koassistDocOptions: {command}: {e}");
         }
     };
     if let Some(language) = &options.language {

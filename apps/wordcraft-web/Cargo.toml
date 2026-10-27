@@ -9,8 +9,9 @@ publish = false
 [lints]
 workspace = true
 
+# KoAssist: the bundle is named after the product, not the upstream crate.
 [[bin]]
-name = "wordcraft-web"
+name = "koassist-doc"
 path = "src/main.rs"
 
 [dependencies]

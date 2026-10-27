@@ -2,17 +2,17 @@
 //!
 //! The browser shell has no control channel (the desktop app listens on a loopback TCP port).
 //! This module exposes the same control layer ([`wordcraft_ui_egui::control`]) to the page as
-//! `window.wordcraft`:
+//! `window.koassistDoc`:
 //!
 //! ```js
-//! wordcraft.open(name, bytes)            // Uint8Array → the app opens it like a dropped file
-//! wordcraft.request(method, params)      // Promise<result>: any control method
+//! koassistDoc.open(name, bytes)            // Uint8Array → the app opens it like a dropped file
+//! koassistDoc.request(method, params)      // Promise<result>: any control method
 //!                                        // (engine.execute, document.inspect, ui.inspect, …)
-//! wordcraft.execute(command, params)     // Promise<result>: shorthand for engine.execute
-//! wordcraft.save(path?)                  // Promise<{bytes: Uint8Array, name}>: the document's bytes
+//! koassistDoc.execute(command, params)     // Promise<result>: shorthand for engine.execute
+//! koassistDoc.save(path?)                  // Promise<{bytes: Uint8Array, name}>: the document's bytes
 //!                                        // and the name it was opened under, no download
-//! wordcraft.onEvent(callback)            // callback({type: "ready" | "dirty", …})
-//! wordcraft.ready                        // true once the app runs
+//! koassistDoc.onEvent(callback)            // callback({type: "ready" | "dirty", …})
+//! koassistDoc.ready                        // true once the app runs
 //! ```
 //!
 //! Requests are queued and answered from the UI thread on the next frame
@@ -105,7 +105,7 @@ impl Bridge {
         true
     }
 
-    /// Install `window.wordcraft`. `inbox` receives opened files, exactly like dropped ones.
+    /// Install `window.koassistDoc`. `inbox` receives opened files, exactly like dropped ones.
     pub fn install(&self, inbox: Inbox) -> Result<(), String> {
         let window = web_sys::window().ok_or("no window")?;
         let api = js_sys::Object::new();
@@ -176,14 +176,14 @@ impl Bridge {
         on_event.forget();
 
         js_sys::Reflect::set(&api, &"ready".into(), &JsValue::FALSE).map_err(js)?;
-        js_sys::Reflect::set(&window, &"wordcraft".into(), &api).map_err(js)?;
+        js_sys::Reflect::set(&window, &"koassistDoc".into(), &api).map_err(js)?;
         Ok(())
     }
 
     /// Mark the API ready (the app runs) and tell listeners.
     pub fn set_ready(&self) {
         if let Some(window) = web_sys::window()
-            && let Ok(api) = js_sys::Reflect::get(&window, &"wordcraft".into())
+            && let Ok(api) = js_sys::Reflect::get(&window, &"koassistDoc".into())
         {
             let _ = js_sys::Reflect::set(&api, &"ready".into(), &JsValue::TRUE);
         }
